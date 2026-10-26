@@ -326,6 +326,16 @@
       #pauseMenu button[hidden] {
         display: none;
       }
+    
+      /* Mobile touch controls for Sonic Time Twisted */
+      #touchControls { display:none; position:fixed; inset:auto 0 max(12px, env(safe-area-inset-bottom)) 0; z-index:1000; padding:0 14px; box-sizing:border-box; justify-content:space-between; align-items:flex-end; pointer-events:none; touch-action:none; user-select:none; -webkit-user-select:none; }
+      #touchControls .touchCluster { display:flex; gap:9px; align-items:flex-end; pointer-events:auto; }
+      #touchControls button { width:clamp(48px, 12vw, 68px); height:clamp(48px, 12vw, 68px); border:2px solid rgba(255,255,255,.8); border-radius:50%; background:rgba(20,25,38,.68); color:white; font:bold 20px Arial,sans-serif; text-shadow:0 1px 3px #000; box-shadow:0 3px 0 rgba(0,0,0,.4); touch-action:none; -webkit-tap-highlight-color:transparent; }
+      #touchControls button.action { background:rgba(0,145,255,.72); width:clamp(56px, 14vw, 76px); height:clamp(56px, 14vw, 76px); }
+      #touchControls button.pressed { background:rgba(255,190,0,.9); transform:translateY(2px); }
+      #touchControls #touchDown { font-size:15px; }
+      @media (pointer:coarse), (max-width:800px) { #touchControls { display:flex; } body { overscroll-behavior:none; } }
+      @media (orientation:portrait) and (max-width:800px) { #touchControls { padding:0 10px; } #touchControls .touchCluster { gap:6px; } }
     </style>
   </head>
   <body>
@@ -986,5 +996,71 @@
     </script>
 	<!-- Load Main Game Runner JS File -->
     <script async type="text/javascript" src="TimeTwisted2.js"></script>
-  </body>
+  
+    <div id="touchControls" aria-label="Touch game controls">
+      <div class="touchCluster">
+        <button type="button" data-key="ArrowLeft" aria-label="Move left">◀</button>
+        <button type="button" data-key="ArrowRight" aria-label="Move right">▶</button>
+        <button type="button" id="touchDown" data-key="ArrowDown" aria-label="Down">▼</button>
+      </div>
+      <div class="touchCluster">
+        <button type="button" data-key="Enter" aria-label="Pause">Ⅱ</button>
+        <button type="button" class="action" data-key="a" aria-label="Jump">A</button>
+        <button type="button" class="action" data-key="s" aria-label="Spin dash">S</button>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const controls = document.getElementById('touchControls');
+        if (!controls) return;
+        const held = new Map();
+        function sendKey(type, key) {
+          const code = key.startsWith('Arrow') ? key : (key === 'Enter' ? 'Enter' : key.toUpperCase());
+          const keyCode = ({ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Enter:13, A:65, S:83})[code] || 0;
+          const event = new KeyboardEvent(type, {key, code, bubbles:true, cancelable:true, keyCode, which:keyCode});
+          document.dispatchEvent(event);
+          window.dispatchEvent(new KeyboardEvent(type, {key, code, bubbles:true, cancelable:true, keyCode, which:keyCode}));
+          const canvas = document.getElementById('canvas');
+          canvas?.focus({preventScroll:true});
+        }
+        controls.querySelectorAll('button[data-key]').forEach(button => {
+          const key = button.dataset.key;
+          const down = event => {
+            event.preventDefault();
+            if (held.has(button)) return;
+            held.set(button, true);
+            button.classList.add('pressed');
+            try { button.setPointerCapture(event.pointerId); } catch (_) {}
+            sendKey('keydown', key);
+            if (key === 'Enter') {
+              sendKey('keyup', key);
+              held.delete(button);
+              button.classList.remove('pressed');
+            }
+          };
+          const up = event => {
+            event.preventDefault();
+            if (!held.has(button)) return;
+            held.delete(button);
+            button.classList.remove('pressed');
+            if (key !== 'Enter') sendKey('keyup', key);
+          };
+          button.addEventListener('pointerdown', down);
+          button.addEventListener('pointerup', up);
+          button.addEventListener('pointercancel', up);
+          button.addEventListener('lostpointercapture', up);
+          button.addEventListener('contextmenu', event => event.preventDefault());
+        });
+        window.addEventListener('blur', () => {
+          controls.querySelectorAll('button[data-key]').forEach(button => {
+            if (held.has(button)) {
+              held.delete(button);
+              button.classList.remove('pressed');
+              sendKey('keyup', button.dataset.key);
+            }
+          });
+        });
+      })();
+    </script>
+\n  </body>
 </html>
