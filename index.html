@@ -360,6 +360,9 @@
       <button class="output-button" onclick="toggleConsole()" title="Lists Console Output and Loading Progress"+>
         Toggle Console
       </button>
+      <button class="output-button" onclick="copyLog()" title="Copies the console log to the clipboard">
+        Copy Log
+      </button>
 	  <!-- Go to Github Repo Button -->
       <button id="QRButton" class="output-button" onclick="togglegithub()" title="Sends you to My Github Repository of this Project"+>
         Visit Github Repo
@@ -510,6 +513,9 @@
           if (arguments.length > 1)
             text = Array.prototype.slice.call(arguments).join(" ");
           console.error(text);
+          // DIAGNOSTIC: also show errors in the on-screen log so they can be copied
+          var el = document.getElementById("output");
+          if (el) { el.value += "[ERR] " + text + "\n"; el.scrollTop = el.scrollHeight; }
         },
         canvas: (function () {
           var canvas = document.getElementById("canvas");
@@ -560,7 +566,70 @@
         },
       };
       Module.setStatus("Downloading...");
-      window.onerror = function (event) {
+      // DIAGNOSTIC: log uncaught errors/rejections to the on-screen log with details
+      function sttLog(line) {
+        var el = document.getElementById("output");
+        if (el) { el.value += line + "\n"; el.scrollTop = el.scrollHeight; }
+        console.error(line);
+      }
+
+      // DIAGNOSTIC: full-screen crash report that resolves wasm function numbers to GML names
+      var sttExportNames = null;
+      function sttLoadExportNames() {
+        if (sttExportNames) return Promise.resolve(sttExportNames);
+        return fetch("TimeTwisted2.wasm").then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+          var d = new Uint8Array(buf), o = 8, map = {};
+          function leb() { var r = 0, s = 0, x; do { x = d[o++]; r |= (x & 0x7f) << s; s += 7; } while (x & 0x80); return r >>> 0; }
+          while (o < d.length) {
+            var id = d[o++], len = leb(), end = o + len;
+            if (id === 7) {
+              var n = leb();
+              for (var i = 0; i < n; i++) {
+                var nl = leb(), nm = "";
+                for (var j = 0; j < nl; j++) nm += String.fromCharCode(d[o + j]);
+                o += nl;
+                var kind = d[o++], idx = leb();
+                if (kind === 0) {
+                  var m = /^_Z(\d+)/.exec(nm);
+                  map[idx] = m ? nm.substr(m[0].length, parseInt(m[1], 10)) : nm;
+                }
+              }
+            }
+            o = end;
+          }
+          sttExportNames = map;
+          return map;
+        });
+      }
+      function sttShowCrash(title, stack) {
+        var box = document.getElementById("stt-crash");
+        if (!box) {
+          box = document.createElement("div");
+          box.id = "stt-crash";
+          box.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.93);color:#fff;font:16px/1.4 monospace;padding:16px;overflow:auto;white-space:pre-wrap;word-break:break-all;";
+          box.onclick = function () { box.style.display = "none"; };
+          document.body.appendChild(box);
+        }
+        box.style.display = "block";
+        var base = "CRASH: " + title + "\n\nSTACK:\n" + stack;
+        box.textContent = base + "\n\nLooking up function names...";
+        var idxs = [];
+        String(stack).replace(/wasm-function\[(\d+)\]/g, function (_, n) { if (idxs.indexOf(n) < 0) idxs.push(n); return _; });
+        if (!idxs.length) { box.textContent = base + "\n\n(tap to close)"; return; }
+        sttLoadExportNames().then(function (map) {
+          var lines = idxs.map(function (n) { return "wasm-function[" + n + "] = " + (map[n] || "(no name)"); });
+          box.textContent = "CRASH: " + title + "\n\nWHERE:\n" + lines.join("\n") + "\n\nSTACK:\n" + stack + "\n\n(tap to close)";
+        }).catch(function (e) { box.textContent = base + "\n\nName lookup failed: " + e + "\n\n(tap to close)"; });
+      }
+      window.addEventListener("unhandledrejection", function (e) {
+        var r = e.reason;
+        sttLog("[UNHANDLED PROMISE] " + (r && r.stack ? r.stack : r));
+        sttShowCrash("Unhandled promise", String(r && r.stack ? r.stack : r));
+      });
+      window.onerror = function (event, src, line, col, err) {
+        sttLog("[UNCAUGHT] " + event + " @ " + src + ":" + line + ":" + col +
+               (err && err.stack ? "\n" + err.stack : ""));
+        sttShowCrash(String(event), err && err.stack ? err.stack : (src + ":" + line + ":" + col));
         // TODO: do not warn on ok events like simulating an infinite loop or exitStatus
         Module.setStatus("Exception thrown, see JavaScript console");
         spinnerElement.style.display = "none";
@@ -590,6 +659,12 @@
           outputElement.style.display = "flex";
           outputElement.scrollIntoView(true);
         }
+      }
+		// DIAGNOSTIC: copy the on-screen log
+      function copyLog() {
+        var t = outputElement.value;
+        if (navigator.clipboard) { navigator.clipboard.writeText(t).then(function(){ alert("Log copied"); }, function(){ outputElement.select(); }); }
+        else { outputElement.select(); document.execCommand("copy"); }
       }
 		// Go To Github Function
       function togglegithub() {
